@@ -1,0 +1,129 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: a571c0d144b14fd4a87a9d9b2aa9fcd6
+      name: Templates/Applications
+  templates:
+    - uuid: 2ce8f92fc6a042aea1afd2a05f7cc7d1
+      template: 'Template App Keepalived'
+      name: 'Template App Keepalived'
+      description: |
+        Keepalived / VRRP monitoring with keepax (https://github.com/michalsarna/keepax).
+        Requires keepax.sh and its UserParameters (keepax[*], keepax.discovery[*]) on the agent.
+      groups:
+        - name: Templates/Applications
+      items:
+        - uuid: ac8efba5910744a88ee6f68fef9d1816
+          name: '[Keepalived] Service: Process count'
+          type: ZABBIX_PASSIVE
+          key: 'proc.num[keepalived]'
+          delay: 30s
+          history: 30d
+          trends: 90d
+          value_type: UNSIGNED
+          description: 'Number of running keepalived processes (native agent check, independent of keepax.sh). 0 means keepalived is down.'
+          tags:
+            - tag: component
+              value: keepalived
+          triggers:
+            - uuid: 491e3d49dfa34bb2a1cf47afe78b537a
+              expression: 'last(/Template App Keepalived/proc.num[keepalived])=0'
+              name: 'Keepalived: Process is not running'
+              priority: HIGH
+              description: 'No keepalived process found on {HOST.NAME}. VRRP failover is not protected by this node.'
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 88a240c6756e41e4a16e513179c6f295
+          name: '[Keepalived] Service: Uptime'
+          type: ZABBIX_PASSIVE
+          key: 'keepax[service, uptime]'
+          delay: 10m
+          history: 30d
+          trends: 90d
+          value_type: UNSIGNED
+          units: uptime
+          tags:
+            - tag: component
+              value: keepalived
+          triggers:
+            - uuid: ca17d02d2c614372baf1ea2e0a658fa0
+              expression: 'change(/Template App Keepalived/keepax[service, uptime])<0'
+              name: 'Keepalived: Service has just been restarted'
+              priority: INFO
+              manual_close: 'YES'
+              dependencies:
+                - name: 'Keepalived: Process is not running'
+                  expression: 'last(/Template App Keepalived/proc.num[keepalived])=0'
+              tags:
+                - tag: scope
+                  value: notice
+      discovery_rules:
+        - uuid: 514ca77934f9403d9024e0b7b429ae00
+          name: '[Keepalived] Discovery: VRRP Instances'
+          type: ZABBIX_PASSIVE
+          key: 'keepax.discovery[vrrp, NAME, list]'
+          delay: 5m
+          lifetime: 1h
+          item_prototypes:
+            - uuid: d5569a0f8ae542a4bdbf779c9cb3999a
+              name: '[Keepalived] VRRP Instance "{#NAME}": State'
+              type: ZABBIX_PASSIVE
+              key: 'keepax[vrrp, data, "{#NAME}", "State"]'
+              delay: 1m
+              history: 30d
+              value_type: CHAR
+              description: 'VRRP state (MASTER / BACKUP / FAULT). If keepalived is down, keepax.sh returns the last known state from its cache.'
+              tags:
+                - tag: component
+                  value: keepalived
+                - tag: vrrp_instance
+                  value: '{#NAME}'
+              trigger_prototypes:
+                - uuid: fcbfea1fa92e41d28d4a31b3dfcdc476
+                  expression: 'find(/Template App Keepalived/keepax[vrrp, data, "{#NAME}", "State"],,"like","MASTER")=1 and find(/Template App Keepalived/keepax[vrrp, data, "{#NAME}", "State"],#2,"like","BACKUP")=1'
+                  name: 'Keepalived: VRRP Instance "{#NAME}" changed state from BACKUP to MASTER'
+                  priority: AVERAGE
+                  description: 'VRRP instance {#NAME} on {HOST.NAME} has transitioned to MASTER (it now owns the virtual IP).'
+                  manual_close: 'YES'
+                  dependencies:
+                    - name: 'Keepalived: Process is not running'
+                      expression: 'last(/Template App Keepalived/proc.num[keepalived])=0'
+                  tags:
+                    - tag: scope
+                      value: notice
+                - uuid: e1181ebb1a83493ca12bb77d3cbccffb
+                  expression: 'find(/Template App Keepalived/keepax[vrrp, data, "{#NAME}", "State"],,"like","BACKUP")=1 and find(/Template App Keepalived/keepax[vrrp, data, "{#NAME}", "State"],#2,"like","MASTER")=1'
+                  name: 'Keepalived: VRRP Instance "{#NAME}" changed state from MASTER to BACKUP'
+                  priority: AVERAGE
+                  description: 'VRRP instance {#NAME} on {HOST.NAME} has transitioned to BACKUP (it released the virtual IP).'
+                  manual_close: 'YES'
+                  dependencies:
+                    - name: 'Keepalived: Process is not running'
+                      expression: 'last(/Template App Keepalived/proc.num[keepalived])=0'
+                  tags:
+                    - tag: scope
+                      value: notice
+                - uuid: 58e5e28bbd224717992404b58f4fae13
+                  expression: 'find(/Template App Keepalived/keepax[vrrp, data, "{#NAME}", "State"],,"like","FAULT")=1'
+                  name: 'Keepalived: VRRP Instance "{#NAME}" is in FAULT state'
+                  priority: HIGH
+                  description: 'VRRP instance {#NAME} on {HOST.NAME} reports FAULT (e.g. tracked interface/script failed).'
+                  manual_close: 'YES'
+                  dependencies:
+                    - name: 'Keepalived: Process is not running'
+                      expression: 'last(/Template App Keepalived/proc.num[keepalived])=0'
+                  tags:
+                    - tag: scope
+                      value: availability
+          trigger_prototypes:
+            - uuid: 1e81559e308a4f0caadb6576b7bc03bd
+              expression: 'find(/Template App Keepalived/keepax[vrrp, data, "{#NAME}", "State"],,"like","MASTER")=1 and last(/Template App Keepalived/proc.num[keepalived])=0'
+              name: 'Keepalived: VRRP Instance "{#NAME}" was MASTER but keepalived is not running'
+              priority: DISASTER
+              description: 'keepalived on {HOST.NAME} stopped while VRRP instance {#NAME} was MASTER (last known state). Check that a BACKUP node has taken over the virtual IP.'
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: availability

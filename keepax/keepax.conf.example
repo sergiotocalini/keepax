@@ -1,2 +1,4 @@
+# keepax configuration (sourced by keepax.sh). deploy.sh fills these in.
 CACHE_TTL="5"
 CACHE_DIR="/tmp/keepax/"
+PID_FILE="/run/keepalived.pid"
